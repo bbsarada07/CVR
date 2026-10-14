@@ -1,0 +1,10 @@
+venv/
+.env
+__pycache__/
+.pytest_cache/
+sentinel.bak/
+sentinel/
+venv314.bak/
+venv312a.bak/
+node_modules/
+*.pyc
