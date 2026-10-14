@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Generator, Iterator, Optional, Union
 
 import evidence as ev
+import executor
 import policy as pol
 from agents import (
     ActionPlannerAgent,
@@ -129,6 +130,10 @@ class Orchestrator:
 
             naive_start = time.perf_counter()
             naive_out = self.naive_agent.process(email)
+            # No gate: whatever tool the naive agent chose really runs.
+            if naive_out.get("executed"):
+                tc = naive_out.get("tool_call") or {}
+                executor.execute(run_id, tc.get("tool"), tc.get("args") or {})
             emit(
                 2,
                 "NAIVE_EXECUTION",
@@ -331,6 +336,7 @@ class Orchestrator:
         exec_status: TraceStatus = "ok"
 
         if decision.verdict == "ALLOW":
+            executor.execute(run_id, effective_action.tool, {k: f.value for k, f in effective_action.args.items()})
             exec_payload["status"] = "executed"
             exec_payload["message"] = f"Action '{effective_action.tool}' permitted and executed successfully."
         elif decision.verdict == "CONFIRM":
@@ -338,10 +344,12 @@ class Orchestrator:
             exec_payload["message"] = f"Action '{effective_action.tool}' requires human confirmation before execution."
             exec_payload["oob_verification_required"] = decision.requires_out_of_band_verification
         elif decision.verdict == "HOLD_FOR_EVIDENCE":
+            print(f"NOT EXECUTED  run={run_id}  {effective_action.tool}  refused by {decision.rule_id}", flush=True)
             exec_payload["status"] = "held_for_evidence"
             exec_payload["message"] = "Action held due to conflicting or insufficient evidence."
             exec_payload["open_questions"] = risk.open_questions
-        else:  # BLOCK
+        else:  # BLOCK: the tool function is never called
+            print(f"NOT EXECUTED  run={run_id}  {effective_action.tool}  refused by {decision.rule_id}", flush=True)
             exec_status = "blocked"
             exec_payload["status"] = "blocked"
             exec_payload["message"] = f"Action refused under security rule {decision.rule_id}: {decision.reason_plain_english}"

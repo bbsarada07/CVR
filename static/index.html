@@ -372,6 +372,9 @@
     <div class="section-title">Decision</div>
     <div id="verdict" class="verdict"><div class="empty">No run yet.</div></div>
 
+    <div class="section-title">Executed actions <span class="muted" id="executed-count"></span></div>
+    <div class="card pad" id="executed"><div class="empty">Nothing has executed yet.</div></div>
+
     <div id="sentinel-only">
       <div class="section-title">Proposed action</div>
       <div class="card pad" id="action"><div class="empty">—</div></div>
@@ -780,6 +783,7 @@
     state.result = result;
     $("trace-meta").textContent = `${result.run_id} · ${result.total_ms} ms`;
     renderVerdict(result);
+    loadExecuted();
     if (!result.sentinel_enabled) return;
     renderAction(result);
     renderRisk(result);
@@ -919,6 +923,23 @@
     $("ev-add").classList.toggle("hidden", !!state.operator[r.run_id]);
   }
 
+  // Only what the tool functions wrote to the server ledger; a blocked run adds nothing here.
+  async function loadExecuted() {
+    try {
+      const data = await (await fetch("/api/ledger")).json();
+      const cur = state.result && state.result.run_id;
+      $("executed-count").textContent = `(${data.count})`;
+      $("executed").innerHTML = data.count ? data.entries.slice().reverse().map(e => `
+        <div class="ev">
+          <div class="meta">
+            <span class="mono">${esc(e.run_id)} · ${esc(new Date(e.timestamp).toLocaleTimeString())}</span>
+            ${e.run_id === cur ? `<span class="pill">this run</span>` : ""}
+          </div>
+          <div class="mono">${esc(e.tool)}(${esc(Object.entries(e.args || {}).map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`).join(", "))})</div>
+        </div>`).join("") : `<div class="empty">Nothing has executed yet.</div>`;
+    } catch (e) { /* informational panel; keep the last state */ }
+  }
+
   // ---------------------------------------------------------------- operator actions
   async function confirmAction(confirmed) {
     if (!state.runId || state.busy) return;
@@ -993,6 +1014,7 @@
   });
 
   loadEmails();
+  loadExecuted();
 </script>
 </body>
 </html>

@@ -13,6 +13,7 @@ Endpoints:
   POST /api/evidence         -> Inject evidence & trigger reassessment loop
   POST /api/confirm          -> Human operator action confirmation / rejection
   GET  /api/audit            -> Execution audit logs & trace inspection
+  GET  /api/ledger           -> Consequential actions that actually executed
   GET  /api/capabilities     -> Agent capability matrix & security tiers
 """
 
@@ -41,6 +42,8 @@ from pydantic import BaseModel, Field as PField
 from agents import ALL_TOOLS, CAPABILITY_MAP, READ_ONLY_TOOLS
 from config import Settings, load_settings
 import evidence as ev
+import executor
+import ledger
 from orchestrator import Orchestrator, OrchestratorResult
 from schemas import Direction, EvidenceItem, TraceEvent
 import seed_data as sd
@@ -528,9 +531,14 @@ async def confirm_action(payload: ConfirmRequest):
     run = runs.get(payload.run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Run '{payload.run_id}' not found")
+    if payload.confirmed and run.verdict != "CONFIRM":
+        # Only a CONFIRM verdict can be approved; BLOCK and HOLD never reach the tool.
+        raise HTTPException(status_code=409, detail=f"Run '{payload.run_id}' has verdict {run.verdict}; only CONFIRM can be approved")
 
     status = "executed" if payload.confirmed else "rejected_by_operator"
     tool_name = run.action.tool if run.action else "action"
+    if payload.confirmed and run.action and not ledger.has_run(run.run_id):
+        executor.execute(run.run_id, run.action.tool, {k: f.value for k, f in run.action.args.items()})
     message = (
         f"Operator CONFIRMED and EXECUTED action '{tool_name}'."
         if payload.confirmed
@@ -567,6 +575,13 @@ async def confirm_action(payload: ConfirmRequest):
 # ---------------------------------------------------------------------------
 # Audit Trail Inspection
 # ---------------------------------------------------------------------------
+
+@app.get("/api/ledger")
+async def get_ledger():
+    """Consequential actions that genuinely ran (written only by the tool functions in executor.py)."""
+    items = ledger.entries()
+    return {"count": len(items), "entries": items}
+
 
 @app.get("/api/audit")
 async def get_audit(run_id: Optional[str] = Query(None)):
